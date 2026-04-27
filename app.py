@@ -7,7 +7,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from ingestion.loader import chunk_text, extract_text_from_uploaded_file
-from llm.chain import embed_query, generate_answer, get_embeddings
+from llm.chain import embed_query, generate_answer, get_embeddings, list_available_models
 from retriever.chroma_store import ChromaVectorStore
 
 
@@ -21,6 +21,8 @@ def _ensure_session_defaults() -> None:
         "indexed_provider": "",
         "indexed_collection": "rag_chunks",
         "suggested_questions": [],
+        "available_models": [],
+        "available_models_provider": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -120,6 +122,33 @@ with st.sidebar:
         value=False,
         help="Mostra scores de similaridade e chunks retornados, incluindo os descartados pelo threshold.",
     )
+
+    st.subheader("Modelos disponiveis")
+    if st.button("Listar modelos da API key"):
+        selected_key = ""
+        if provider == "openai":
+            selected_key = openai_key
+        elif provider == "google":
+            selected_key = google_key
+        elif provider == "huggingface":
+            selected_key = hf_key
+
+        if not selected_key:
+            st.error("Informe a API key do provedor selecionado para listar os modelos.")
+        else:
+            try:
+                models = list_available_models(provider=provider, api_key=selected_key, limit=20)
+                st.session_state.available_models = models
+                st.session_state.available_models_provider = provider
+                st.success(f"{len(models)} modelos carregados para {provider}.")
+            except Exception as exc:
+                st.session_state.available_models = []
+                st.session_state.available_models_provider = ""
+                st.error(f"Falha ao listar modelos: {exc}")
+
+    if st.session_state.available_models and st.session_state.available_models_provider == provider:
+        for idx, model_name in enumerate(st.session_state.available_models, start=1):
+            st.caption(f"{idx}. {model_name}")
 
     if st.button("Limpar indice atual"):
         st.session_state.index_ready = False

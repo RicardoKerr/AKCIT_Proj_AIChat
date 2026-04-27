@@ -154,3 +154,47 @@ def generate_answer(question: str, context: str, provider: str, api_keys: Dict[s
         return _huggingface_answer(question, context, api_keys["huggingface"])
 
     raise ValueError(f"Provedor nao suportado: {provider}")
+
+
+def list_available_models(provider: str, api_key: str, limit: int = 20) -> List[str]:
+    if not api_key:
+        raise ValueError("API key nao informada")
+
+    if provider == "openai":
+        client = OpenAI(api_key=api_key)
+        models = client.models.list()
+        names = sorted([model.id for model in models.data])
+        return names[:limit]
+
+    if provider == "google":
+        google_genai.configure(api_key=api_key)
+        names: List[str] = []
+        for model in google_genai.list_models():
+            methods = getattr(model, "supported_generation_methods", []) or []
+            if "generateContent" in methods or "embedContent" in methods:
+                names.append(model.name)
+        names = sorted(names)
+        return names[:limit]
+
+    if provider == "huggingface":
+        headers = {"Authorization": f"Bearer {api_key}"}
+        resp = requests.get(
+            "https://huggingface.co/api/models?limit=100&sort=downloads&direction=-1",
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Resposta invalida ao listar modelos do Hugging Face")
+
+        names: List[str] = []
+        for item in payload:
+            model_id = item.get("id")
+            if model_id:
+                names.append(model_id)
+            if len(names) >= limit:
+                break
+        return names
+
+    raise ValueError(f"Provedor nao suportado: {provider}")

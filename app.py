@@ -114,7 +114,7 @@ with st.sidebar:
     )
 
     top_k = st.slider("Top-K", min_value=3, max_value=5, value=4)
-    similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.6, 0.05)
+    similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.25, 0.05)
     diagnostic_mode = st.checkbox(
         "Modo diagnostico",
         value=False,
@@ -231,9 +231,25 @@ if st.button("Perguntar"):
             )
             results = [row for row in diagnostic_results if float(row.get("similarity", 0.0)) >= similarity_threshold][:top_k]
 
+            low_confidence_results = [
+                row for row in diagnostic_results if float(row.get("similarity", 0.0)) >= 0.2
+            ][:top_k]
+            used_low_confidence_fallback = False
+
+            # Evita falso-negativo quando o threshold configurado estiver muito alto.
+            if not results and low_confidence_results:
+                results = low_confidence_results
+                used_low_confidence_fallback = True
+
             if not results:
                 st.warning("Nao encontrei essa informacao no documento.")
             else:
+                if used_low_confidence_fallback:
+                    st.warning(
+                        "Nao havia resultados acima do threshold configurado. "
+                        "Usei os melhores trechos com similaridade moderada (>= 0.2)."
+                    )
+
                 context = "\n\n".join([r["content"] for r in results])
                 answer = generate_answer(
                     question=question,

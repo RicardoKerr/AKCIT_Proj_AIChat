@@ -293,8 +293,7 @@ if st.button("Perguntar"):
                 st.subheader("Trechos fonte")
                 for idx, row in enumerate(results, start=1):
                     source = row.get("metadata", {}).get("source", "desconhecido")
-                    similarity = round(float(row.get("similarity", 0.0)), 4)
-                    st.markdown(f"{idx}. Fonte: {source} | Similaridade: {similarity}")
+                    st.markdown(f"{idx}. Fonte: {source}")
                     st.code(row["content"][:1000])
 
             if diagnostic_mode:

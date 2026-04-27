@@ -332,6 +332,7 @@ if st.button("Processar documentos", type="primary"):
 
                 collection_name = f"rag_chunks_{provider}"
                 store = ChromaVectorStore(collection_name=collection_name, persist_dir=".chroma")
+                store.reset_collection()
                 store.upsert_chunks(chunks=all_chunks, embeddings=embeddings)
 
                 st.session_state.index_ready = True
@@ -383,6 +384,7 @@ if st.button("Perguntar"):
                 query_embedding=query_embedding,
                 top_k=max(top_k, 8),
                 similarity_threshold=0.0,
+                source_filter=st.session_state.indexed_docs,
             )
             results = [row for row in diagnostic_results if float(row.get("similarity", 0.0)) >= similarity_threshold][:top_k]
 

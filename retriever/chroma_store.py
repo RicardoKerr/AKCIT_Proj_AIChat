@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from uuid import uuid4
 
 import chromadb
@@ -12,6 +12,18 @@ class ChromaVectorStore:
             path=persist_dir,
             settings=Settings(anonymized_telemetry=False),
         )
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+    def reset_collection(self) -> None:
+        try:
+            self.client.delete_collection(self.collection_name)
+        except Exception:
+            # Se a coleção não existir, apenas recria.
+            pass
+
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -42,12 +54,19 @@ class ChromaVectorStore:
         query_embedding: List[float],
         top_k: int = 4,
         similarity_threshold: float = 0.6,
+        source_filter: Optional[List[str]] = None,
     ) -> List[dict]:
-        query_result = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"],
-        )
+        query_args = {
+            "query_embeddings": [query_embedding],
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+
+        if source_filter:
+            unique_sources = sorted(set(source_filter))
+            query_args["where"] = {"source": {"$in": unique_sources}}
+
+        query_result = self.collection.query(**query_args)
 
         documents = query_result.get("documents", [[]])[0]
         metadatas = query_result.get("metadatas", [[]])[0]

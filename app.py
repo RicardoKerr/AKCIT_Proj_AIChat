@@ -64,7 +64,13 @@ def _filter_models_for_tasks(provider: str, models: List[str]) -> Tuple[List[str
         chat_models = [m for m in models if m not in embedding_models]
 
     if not embedding_models:
-        embedding_models = models[:]
+        # Evita fallback para modelos de chat no caso OpenAI/Google.
+        if provider == "openai":
+            embedding_models = ["text-embedding-3-small"]
+        elif provider == "google":
+            embedding_models = ["models/text-embedding-004"]
+        else:
+            embedding_models = models[:]
     if not chat_models:
         chat_models = models[:]
 
@@ -203,6 +209,18 @@ with st.sidebar:
             models=st.session_state.available_models,
         )
 
+        if provider == "openai" and all("embedding" not in m for m in embedding_options):
+            st.warning(
+                "Nenhum modelo de embeddings foi retornado pela API para OpenAI. "
+                "Usando fallback: text-embedding-3-small."
+            )
+
+        if provider == "google" and all("embed" not in m for m in embedding_options):
+            st.warning(
+                "Nenhum modelo de embeddings foi retornado pela API para Google. "
+                "Usando fallback: models/text-embedding-004."
+            )
+
         if st.session_state.selected_embedding_model not in embedding_options:
             st.session_state.selected_embedding_model = embedding_options[0]
         if st.session_state.selected_chat_model not in chat_options:
@@ -279,6 +297,12 @@ if st.button("Processar documentos", type="primary"):
         st.stop()
     elif st.session_state.available_models_provider != provider:
         st.error("Carregue os modelos da API key para o provedor selecionado antes de processar.")
+        st.stop()
+    elif provider == "openai" and "embedding" not in selected_embedding_model:
+        st.error("Para OpenAI, selecione um modelo de embeddings (ex.: text-embedding-3-small).")
+        st.stop()
+    elif provider == "google" and "embed" not in selected_embedding_model:
+        st.error("Para Google, selecione um modelo de embeddings (ex.: models/text-embedding-004).")
         st.stop()
     else:
         try:

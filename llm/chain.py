@@ -86,9 +86,19 @@ def get_embeddings(
 
     if provider == "openai":
         model = embedding_model or "text-embedding-3-small"
+        if "embedding" not in model:
+            raise ValueError(
+                f"Modelo invalido para embeddings OpenAI: '{model}'. "
+                "Use um modelo de embeddings, como text-embedding-3-small."
+            )
         return _openai_embeddings(texts, api_keys["openai"], model=model)
     if provider == "google":
         model = embedding_model or "models/text-embedding-004"
+        if "embed" not in model:
+            raise ValueError(
+                f"Modelo invalido para embeddings Google: '{model}'. "
+                "Use um modelo de embeddings, como models/text-embedding-004."
+            )
         return _google_embeddings(texts, api_keys["google"], model=model)
     if provider == "huggingface":
         model = embedding_model or "sentence-transformers/all-MiniLM-L6-v2"

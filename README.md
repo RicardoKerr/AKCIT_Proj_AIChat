@@ -1,4 +1,4 @@
-# Chatbot RAG com PostgreSQL
+# Chatbot RAG com ChromaDB Local
 
 MVP de chatbot de perguntas e respostas baseado em documentos, usando Retrieval Augmented Generation (RAG).
 
@@ -7,7 +7,7 @@ MVP de chatbot de perguntas e respostas baseado em documentos, usando Retrieval 
 - Upload de arquivos: PDF, TXT, DOCX, XLSX e CSV
 - Extracao e chunking de texto
 - Embeddings com OpenAI, Google ou Hugging Face
-- Armazenamento vetorial no PostgreSQL com pgvector
+- Armazenamento vetorial local com ChromaDB
 - Busca Top-K por similaridade
 - Resposta baseada apenas no contexto recuperado
 - Exibicao de trecho fonte na interface
@@ -16,7 +16,7 @@ MVP de chatbot de perguntas e respostas baseado em documentos, usando Retrieval 
 
 - app.py
 - ingestion/loader.py
-- retriever/postgres_store.py
+- retriever/chroma_store.py
 - llm/chain.py
 - tests/test_loader.py
 - requirements.txt
@@ -24,8 +24,6 @@ MVP de chatbot de perguntas e respostas baseado em documentos, usando Retrieval 
 ## Requisitos
 
 - Python 3.12+
-- PostgreSQL 14+
-- Extensao pgvector habilitada
 
 ## Instalacao
 
@@ -44,15 +42,20 @@ A interface permite informar chaves de API durante a execucao:
 - Google API Key
 - Hugging Face API Token
 
-Tambem e necessario informar PostgreSQL DSN:
-
-- Exemplo: postgresql://user:password@localhost:5432/ragdb
+Nao e necessario configurar banco externo para avaliacao.
+Os embeddings sao armazenados localmente na pasta `.chroma`.
 
 ## Execucao
 
 ```bash
 streamlit run app.py
 ```
+
+Fluxo de avaliacao simples:
+
+1. Instalar dependencias
+2. Rodar Streamlit
+3. Enviar documento e testar perguntas
 
 ## Testes
 

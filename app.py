@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 from ingestion.loader import chunk_text, extract_text_from_uploaded_file
 from llm.chain import embed_query, generate_answer, get_embeddings
-from retriever.postgres_store import PostgresVectorStore
+from retriever.chroma_store import ChromaVectorStore
 
 
 load_dotenv()
@@ -17,16 +17,14 @@ def _ensure_session_defaults() -> None:
         "index_ready": False,
         "indexed_docs": [],
         "indexed_provider": "",
+        "indexed_collection": "rag_chunks",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-def _validate_runtime(provider: str, api_keys: Dict[str, str], postgres_dsn: str) -> bool:
-    if not postgres_dsn:
-        st.error("Informe o PostgreSQL DSN para armazenar e consultar embeddings.")
-        return False
+def _validate_runtime(provider: str, api_keys: Dict[str, str]) -> bool:
 
     if not api_keys.get(provider):
         st.error(f"Informe a chave do provedor selecionado: {provider}.")
@@ -66,12 +64,6 @@ with st.sidebar:
         value=os.getenv("HUGGINGFACE_API_TOKEN", ""),
     )
 
-    postgres_dsn = st.text_input(
-        "PostgreSQL DSN",
-        value=os.getenv("POSTGRES_DSN", ""),
-        help="Exemplo: postgresql://user:password@localhost:5432/ragdb",
-    )
-
     top_k = st.slider("Top-K", min_value=3, max_value=5, value=4)
     similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.6, 0.05)
 
@@ -100,13 +92,14 @@ if st.session_state.index_ready:
     st.info(
         "Indice ativo na sessao. "
         f"Provedor: {st.session_state.indexed_provider}. "
+        f"Colecao: {st.session_state.indexed_collection}. "
         f"Arquivos: {indexed_files_text}"
     )
 
 if st.button("Processar documentos", type="primary"):
     if not uploaded_files:
         st.error("Envie pelo menos um arquivo antes de processar.")
-    elif not _validate_runtime(provider=provider, api_keys=api_keys, postgres_dsn=postgres_dsn):
+    elif not _validate_runtime(provider=provider, api_keys=api_keys):
         st.stop()
     else:
         try:
@@ -129,13 +122,14 @@ if st.button("Processar documentos", type="primary"):
                 texts = [c["content"] for c in all_chunks]
                 embeddings = get_embeddings(texts=texts, provider=provider, api_keys=api_keys)
 
-                store = PostgresVectorStore(dsn=postgres_dsn)
-                store.ensure_schema()
+                collection_name = f"rag_chunks_{provider}"
+                store = ChromaVectorStore(collection_name=collection_name, persist_dir=".chroma")
                 store.upsert_chunks(chunks=all_chunks, embeddings=embeddings)
 
                 st.session_state.index_ready = True
                 st.session_state.indexed_docs = indexed_files
                 st.session_state.indexed_provider = provider
+                st.session_state.indexed_collection = collection_name
                 st.success(f"Indexacao concluida com {len(all_chunks)} chunks.")
         except Exception as exc:
             st.session_state.index_ready = False
@@ -153,7 +147,7 @@ if st.button("Perguntar"):
             "O provedor atual difere do provedor usado na indexacao. "
             "Reprocesse os documentos com o mesmo provedor selecionado para garantir consistencia."
         )
-    elif not _validate_runtime(provider=provider, api_keys=api_keys, postgres_dsn=postgres_dsn):
+    elif not _validate_runtime(provider=provider, api_keys=api_keys):
         st.stop()
     else:
         try:
@@ -163,7 +157,10 @@ if st.button("Perguntar"):
                 api_keys=api_keys,
             )
 
-            store = PostgresVectorStore(dsn=postgres_dsn)
+            store = ChromaVectorStore(
+                collection_name=st.session_state.indexed_collection,
+                persist_dir=".chroma",
+            )
             results = store.search_similar(
                 query_embedding=query_embedding,
                 top_k=top_k,

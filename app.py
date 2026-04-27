@@ -1,7 +1,7 @@
 import os
 import re
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -23,19 +23,52 @@ def _ensure_session_defaults() -> None:
         "suggested_questions": [],
         "available_models": [],
         "available_models_provider": "",
+        "selected_chat_model": "",
+        "selected_embedding_model": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-def _validate_runtime(provider: str, api_keys: Dict[str, str]) -> bool:
-
-    if not api_keys.get(provider):
+def _validate_runtime(provider: str, api_key: str, chat_model: str, embedding_model: str) -> bool:
+    if not api_key:
         st.error(f"Informe a chave do provedor selecionado: {provider}.")
         return False
 
+    if not embedding_model:
+        st.error("Selecione um modelo de embeddings para processar e consultar documentos.")
+        return False
+
+    if not chat_model:
+        st.error("Selecione um modelo de resposta para gerar as respostas do chat.")
+        return False
+
     return True
+
+
+def _filter_models_for_tasks(provider: str, models: List[str]) -> Tuple[List[str], List[str]]:
+    embedding_keywords = ["embed", "embedding", "text-embedding", "e5", "bge", "minilm", "gte"]
+
+    if provider == "openai":
+        embedding_models = [m for m in models if "embedding" in m]
+        chat_models = [
+            m for m in models
+            if m.startswith("gpt") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+        ]
+    elif provider == "google":
+        embedding_models = [m for m in models if "embed" in m]
+        chat_models = [m for m in models if "gemini" in m and "embed" not in m]
+    else:
+        embedding_models = [m for m in models if any(keyword in m.lower() for keyword in embedding_keywords)]
+        chat_models = [m for m in models if m not in embedding_models]
+
+    if not embedding_models:
+        embedding_models = models[:]
+    if not chat_models:
+        chat_models = models[:]
+
+    return embedding_models, chat_models
 
 
 def _normalize_token(token: str) -> str:
@@ -91,30 +124,111 @@ st.title("Chatbot de Perguntas e Respostas (RAG)")
 st.caption("Responda perguntas com base nos documentos enviados.")
 
 with st.sidebar:
-    st.header("Configuracao")
+    st.header("Configuracao do LLM")
+    st.caption("Fluxo: provedor -> API key -> modelos -> processamento")
+
+    previous_provider = st.session_state.get("current_provider", "openai")
     provider = st.selectbox(
         "Provedor de IA",
         options=["openai", "google", "huggingface"],
         index=0,
     )
+    st.session_state.current_provider = provider
 
-    st.subheader("Chaves de API")
-    openai_key = st.text_input(
-        "OpenAI API Key",
+    if previous_provider != provider:
+        st.session_state.available_models = []
+        st.session_state.available_models_provider = ""
+        st.session_state.selected_chat_model = ""
+        st.session_state.selected_embedding_model = ""
+
+    st.subheader("1) API key")
+    api_keys: Dict[str, str] = {
+        "openai": st.session_state.get("openai_api_key", os.getenv("OPENAI_API_KEY", "")),
+        "google": st.session_state.get("google_api_key", os.getenv("GOOGLE_API_KEY", "")),
+        "huggingface": st.session_state.get("hf_api_key", os.getenv("HUGGINGFACE_API_TOKEN", "")),
+    }
+
+    key_labels = {
+        "openai": "OpenAI API Key",
+        "google": "Google API Key",
+        "huggingface": "Hugging Face API Token",
+    }
+    key_state_names = {
+        "openai": "openai_api_key",
+        "google": "google_api_key",
+        "huggingface": "hf_api_key",
+    }
+
+    api_keys[provider] = st.text_input(
+        key_labels[provider],
         type="password",
-        value=os.getenv("OPENAI_API_KEY", ""),
-    )
-    google_key = st.text_input(
-        "Google API Key",
-        type="password",
-        value=os.getenv("GOOGLE_API_KEY", ""),
-    )
-    hf_key = st.text_input(
-        "Hugging Face API Token",
-        type="password",
-        value=os.getenv("HUGGINGFACE_API_TOKEN", ""),
+        value=api_keys[provider],
+        key=key_state_names[provider],
     )
 
+    st.subheader("2) Modelos")
+    if st.button("Conectar API e carregar modelos"):
+        selected_key = api_keys.get(provider, "")
+        if not selected_key:
+            st.error("Informe a API key do provedor selecionado para carregar os modelos.")
+        else:
+            try:
+                models = list_available_models(provider=provider, api_key=selected_key, limit=40)
+                if not models:
+                    st.error("Nenhum modelo retornado para esta API key.")
+                else:
+                    embedding_models, chat_models = _filter_models_for_tasks(provider=provider, models=models)
+                    st.session_state.available_models = models
+                    st.session_state.available_models_provider = provider
+                    st.session_state.selected_embedding_model = embedding_models[0]
+                    st.session_state.selected_chat_model = chat_models[0]
+                    st.success(f"{len(models)} modelos carregados para {provider}.")
+            except Exception as exc:
+                st.session_state.available_models = []
+                st.session_state.available_models_provider = ""
+                st.session_state.selected_chat_model = ""
+                st.session_state.selected_embedding_model = ""
+                st.error(f"Falha ao listar modelos: {exc}")
+
+    model_source_ok = (
+        st.session_state.available_models
+        and st.session_state.available_models_provider == provider
+    )
+
+    selected_chat_model = ""
+    selected_embedding_model = ""
+    if model_source_ok:
+        embedding_options, chat_options = _filter_models_for_tasks(
+            provider=provider,
+            models=st.session_state.available_models,
+        )
+
+        if st.session_state.selected_embedding_model not in embedding_options:
+            st.session_state.selected_embedding_model = embedding_options[0]
+        if st.session_state.selected_chat_model not in chat_options:
+            st.session_state.selected_chat_model = chat_options[0]
+
+        selected_embedding_model = st.selectbox(
+            "Modelo de embeddings",
+            options=embedding_options,
+            index=embedding_options.index(st.session_state.selected_embedding_model),
+        )
+        selected_chat_model = st.selectbox(
+            "Modelo de resposta",
+            options=chat_options,
+            index=chat_options.index(st.session_state.selected_chat_model),
+        )
+
+        st.session_state.selected_embedding_model = selected_embedding_model
+        st.session_state.selected_chat_model = selected_chat_model
+
+        with st.expander("Ver modelos carregados"):
+            for idx, model_name in enumerate(st.session_state.available_models[:30], start=1):
+                st.caption(f"{idx}. {model_name}")
+    else:
+        st.info("Conecte a API key para carregar e selecionar os modelos.")
+
+    st.subheader("3) Recuperacao")
     top_k = st.slider("Top-K", min_value=3, max_value=5, value=4)
     similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.25, 0.05)
     diagnostic_mode = st.checkbox(
@@ -123,38 +237,12 @@ with st.sidebar:
         help="Mostra scores de similaridade e chunks retornados, incluindo os descartados pelo threshold.",
     )
 
-    st.subheader("Modelos disponiveis")
-    if st.button("Listar modelos da API key"):
-        selected_key = ""
-        if provider == "openai":
-            selected_key = openai_key
-        elif provider == "google":
-            selected_key = google_key
-        elif provider == "huggingface":
-            selected_key = hf_key
-
-        if not selected_key:
-            st.error("Informe a API key do provedor selecionado para listar os modelos.")
-        else:
-            try:
-                models = list_available_models(provider=provider, api_key=selected_key, limit=20)
-                st.session_state.available_models = models
-                st.session_state.available_models_provider = provider
-                st.success(f"{len(models)} modelos carregados para {provider}.")
-            except Exception as exc:
-                st.session_state.available_models = []
-                st.session_state.available_models_provider = ""
-                st.error(f"Falha ao listar modelos: {exc}")
-
-    if st.session_state.available_models and st.session_state.available_models_provider == provider:
-        for idx, model_name in enumerate(st.session_state.available_models, start=1):
-            st.caption(f"{idx}. {model_name}")
-
     if st.button("Limpar indice atual"):
         st.session_state.index_ready = False
         st.session_state.indexed_docs = []
         st.session_state.indexed_provider = ""
         st.session_state.suggested_questions = []
+        st.session_state.indexed_collection = f"rag_chunks_{provider}"
         st.success("Indice removido da sessao. Processe os documentos novamente.")
 
 st.divider()
@@ -164,12 +252,7 @@ uploaded_files = st.file_uploader(
     type=["pdf", "txt", "docx", "xlsx", "csv"],
     accept_multiple_files=True,
 )
-
-api_keys: Dict[str, str] = {
-    "openai": openai_key,
-    "google": google_key,
-    "huggingface": hf_key,
-}
+active_api_key = api_keys.get(provider, "")
 
 if st.session_state.index_ready:
     indexed_files_text = ", ".join(st.session_state.indexed_docs) if st.session_state.indexed_docs else "nao informado"
@@ -187,7 +270,15 @@ if st.session_state.index_ready:
 if st.button("Processar documentos", type="primary"):
     if not uploaded_files:
         st.error("Envie pelo menos um arquivo antes de processar.")
-    elif not _validate_runtime(provider=provider, api_keys=api_keys):
+    elif not _validate_runtime(
+        provider=provider,
+        api_key=active_api_key,
+        chat_model=selected_chat_model,
+        embedding_model=selected_embedding_model,
+    ):
+        st.stop()
+    elif st.session_state.available_models_provider != provider:
+        st.error("Carregue os modelos da API key para o provedor selecionado antes de processar.")
         st.stop()
     else:
         try:
@@ -208,7 +299,12 @@ if st.button("Processar documentos", type="primary"):
                 st.error("Nao foi possivel extrair conteudo util dos arquivos enviados.")
             else:
                 texts = [c["content"] for c in all_chunks]
-                embeddings = get_embeddings(texts=texts, provider=provider, api_keys=api_keys)
+                embeddings = get_embeddings(
+                    texts=texts,
+                    provider=provider,
+                    api_keys=api_keys,
+                    embedding_model=selected_embedding_model,
+                )
 
                 collection_name = f"rag_chunks_{provider}"
                 store = ChromaVectorStore(collection_name=collection_name, persist_dir=".chroma")
@@ -239,7 +335,12 @@ if st.button("Perguntar"):
             "O provedor atual difere do provedor usado na indexacao. "
             "Reprocesse os documentos com o mesmo provedor selecionado para garantir consistencia."
         )
-    elif not _validate_runtime(provider=provider, api_keys=api_keys):
+    elif not _validate_runtime(
+        provider=provider,
+        api_key=active_api_key,
+        chat_model=selected_chat_model,
+        embedding_model=selected_embedding_model,
+    ):
         st.stop()
     else:
         try:
@@ -247,6 +348,7 @@ if st.button("Perguntar"):
                 question,
                 provider=provider,
                 api_keys=api_keys,
+                embedding_model=selected_embedding_model,
             )
 
             store = ChromaVectorStore(
@@ -285,6 +387,7 @@ if st.button("Perguntar"):
                     context=context,
                     provider=provider,
                     api_keys=api_keys,
+                    chat_model=selected_chat_model,
                 )
 
                 st.subheader("Resposta")

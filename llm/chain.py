@@ -24,19 +24,19 @@ def _normalize_embedding(values: List[float], target_dim: int = 1536) -> List[fl
     return padded
 
 
-def _openai_embeddings(texts: List[str], api_key: str) -> List[List[float]]:
+def _openai_embeddings(texts: List[str], api_key: str, model: str = "text-embedding-3-small") -> List[List[float]]:
     client = OpenAI(api_key=api_key)
-    response = client.embeddings.create(model="text-embedding-3-small", input=texts)
+    response = client.embeddings.create(model=model, input=texts)
     vectors = [item.embedding for item in response.data]
     return [_normalize_embedding(v) for v in vectors]
 
 
-def _google_embeddings(texts: List[str], api_key: str) -> List[List[float]]:
+def _google_embeddings(texts: List[str], api_key: str, model: str = "models/text-embedding-004") -> List[List[float]]:
     google_genai.configure(api_key=api_key)
     vectors: List[List[float]] = []
     for text in texts:
         response = google_genai.embed_content(
-            model="models/text-embedding-004",
+            model=model,
             content=text,
             task_type="retrieval_document",
         )
@@ -44,13 +44,17 @@ def _google_embeddings(texts: List[str], api_key: str) -> List[List[float]]:
     return vectors
 
 
-def _huggingface_embeddings(texts: List[str], api_key: str) -> List[List[float]]:
+def _huggingface_embeddings(
+    texts: List[str],
+    api_key: str,
+    model: str = "sentence-transformers/all-MiniLM-L6-v2",
+) -> List[List[float]]:
     vectors: List[List[float]] = []
     headers = {"Authorization": f"Bearer {api_key}"}
 
     for text in texts:
         resp = requests.post(
-            "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2",
+            f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model}",
             headers=headers,
             json={"inputs": text},
             timeout=60,
@@ -71,28 +75,46 @@ def _huggingface_embeddings(texts: List[str], api_key: str) -> List[List[float]]
     return vectors
 
 
-def get_embeddings(texts: List[str], provider: str, api_keys: Dict[str, str]) -> List[List[float]]:
+def get_embeddings(
+    texts: List[str],
+    provider: str,
+    api_keys: Dict[str, str],
+    embedding_model: str = "",
+) -> List[List[float]]:
     if not texts:
         return []
 
     if provider == "openai":
-        return _openai_embeddings(texts, api_keys["openai"])
+        model = embedding_model or "text-embedding-3-small"
+        return _openai_embeddings(texts, api_keys["openai"], model=model)
     if provider == "google":
-        return _google_embeddings(texts, api_keys["google"])
+        model = embedding_model or "models/text-embedding-004"
+        return _google_embeddings(texts, api_keys["google"], model=model)
     if provider == "huggingface":
-        return _huggingface_embeddings(texts, api_keys["huggingface"])
+        model = embedding_model or "sentence-transformers/all-MiniLM-L6-v2"
+        return _huggingface_embeddings(texts, api_keys["huggingface"], model=model)
 
     raise ValueError(f"Provedor nao suportado: {provider}")
 
 
-def embed_query(query: str, provider: str, api_keys: Dict[str, str]) -> List[float]:
-    vectors = get_embeddings(texts=[query], provider=provider, api_keys=api_keys)
+def embed_query(
+    query: str,
+    provider: str,
+    api_keys: Dict[str, str],
+    embedding_model: str = "",
+) -> List[float]:
+    vectors = get_embeddings(
+        texts=[query],
+        provider=provider,
+        api_keys=api_keys,
+        embedding_model=embedding_model,
+    )
     if not vectors:
         raise RuntimeError("Falha ao gerar embedding da pergunta")
     return vectors[0]
 
 
-def _openai_answer(question: str, context: str, api_key: str) -> str:
+def _openai_answer(question: str, context: str, api_key: str, model: str = "gpt-4o-mini") -> str:
     client = OpenAI(api_key=api_key)
     prompt = (
         f"Contexto:\n{context}\n\n"
@@ -100,7 +122,7 @@ def _openai_answer(question: str, context: str, api_key: str) -> str:
     )
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
@@ -110,9 +132,9 @@ def _openai_answer(question: str, context: str, api_key: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-def _google_answer(question: str, context: str, api_key: str) -> str:
+def _google_answer(question: str, context: str, api_key: str, model_name: str = "gemini-1.5-flash") -> str:
     google_genai.configure(api_key=api_key)
-    model = google_genai.GenerativeModel(model_name="gemini-1.5-flash")
+    model = google_genai.GenerativeModel(model_name=model_name)
     prompt = (
         f"{DEFAULT_SYSTEM_PROMPT}\n\n"
         f"Contexto:\n{context}\n\n"
@@ -122,7 +144,7 @@ def _google_answer(question: str, context: str, api_key: str) -> str:
     return (response.text or "").strip()
 
 
-def _huggingface_answer(question: str, context: str, api_key: str) -> str:
+def _huggingface_answer(question: str, context: str, api_key: str, model: str = "google/flan-t5-large") -> str:
     headers = {"Authorization": f"Bearer {api_key}"}
     prompt = (
         f"{DEFAULT_SYSTEM_PROMPT}\n\n"
@@ -131,7 +153,7 @@ def _huggingface_answer(question: str, context: str, api_key: str) -> str:
     )
 
     resp = requests.post(
-        "https://api-inference.huggingface.co/models/google/flan-t5-large",
+        f"https://api-inference.huggingface.co/models/{model}",
         headers=headers,
         json={"inputs": prompt},
         timeout=60,
@@ -145,13 +167,22 @@ def _huggingface_answer(question: str, context: str, api_key: str) -> str:
     raise RuntimeError("Resposta invalida da API Hugging Face para geracao")
 
 
-def generate_answer(question: str, context: str, provider: str, api_keys: Dict[str, str]) -> str:
+def generate_answer(
+    question: str,
+    context: str,
+    provider: str,
+    api_keys: Dict[str, str],
+    chat_model: str = "",
+) -> str:
     if provider == "openai":
-        return _openai_answer(question, context, api_keys["openai"])
+        model = chat_model or "gpt-4o-mini"
+        return _openai_answer(question, context, api_keys["openai"], model=model)
     if provider == "google":
-        return _google_answer(question, context, api_keys["google"])
+        model = chat_model or "gemini-1.5-flash"
+        return _google_answer(question, context, api_keys["google"], model_name=model)
     if provider == "huggingface":
-        return _huggingface_answer(question, context, api_keys["huggingface"])
+        model = chat_model or "google/flan-t5-large"
+        return _huggingface_answer(question, context, api_keys["huggingface"], model=model)
 
     raise ValueError(f"Provedor nao suportado: {provider}")
 

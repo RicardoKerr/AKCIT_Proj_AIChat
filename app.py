@@ -2,13 +2,41 @@ import os
 from typing import Dict, List
 
 import streamlit as st
+from dotenv import load_dotenv
 
 from ingestion.loader import chunk_text, extract_text_from_uploaded_file
 from llm.chain import embed_query, generate_answer, get_embeddings
 from retriever.postgres_store import PostgresVectorStore
 
 
+load_dotenv()
+
+
+def _ensure_session_defaults() -> None:
+    defaults = {
+        "index_ready": False,
+        "indexed_docs": [],
+        "indexed_provider": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _validate_runtime(provider: str, api_keys: Dict[str, str], postgres_dsn: str) -> bool:
+    if not postgres_dsn:
+        st.error("Informe o PostgreSQL DSN para armazenar e consultar embeddings.")
+        return False
+
+    if not api_keys.get(provider):
+        st.error(f"Informe a chave do provedor selecionado: {provider}.")
+        return False
+
+    return True
+
+
 st.set_page_config(page_title="Chatbot RAG", page_icon="RAG", layout="wide")
+_ensure_session_defaults()
 
 st.title("Chatbot de Perguntas e Respostas (RAG)")
 st.caption("Responda perguntas com base nos documentos enviados.")
@@ -22,9 +50,21 @@ with st.sidebar:
     )
 
     st.subheader("Chaves de API")
-    openai_key = st.text_input("OpenAI API Key", type="password")
-    google_key = st.text_input("Google API Key", type="password")
-    hf_key = st.text_input("Hugging Face API Token", type="password")
+    openai_key = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value=os.getenv("OPENAI_API_KEY", ""),
+    )
+    google_key = st.text_input(
+        "Google API Key",
+        type="password",
+        value=os.getenv("GOOGLE_API_KEY", ""),
+    )
+    hf_key = st.text_input(
+        "Hugging Face API Token",
+        type="password",
+        value=os.getenv("HUGGINGFACE_API_TOKEN", ""),
+    )
 
     postgres_dsn = st.text_input(
         "PostgreSQL DSN",
@@ -35,6 +75,12 @@ with st.sidebar:
     top_k = st.slider("Top-K", min_value=3, max_value=5, value=4)
     similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.6, 0.05)
 
+    if st.button("Limpar indice atual"):
+        st.session_state.index_ready = False
+        st.session_state.indexed_docs = []
+        st.session_state.indexed_provider = ""
+        st.success("Indice removido da sessao. Processe os documentos novamente.")
+
 st.divider()
 
 uploaded_files = st.file_uploader(
@@ -43,25 +89,29 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
-if "index_ready" not in st.session_state:
-    st.session_state.index_ready = False
-
 api_keys: Dict[str, str] = {
     "openai": openai_key,
     "google": google_key,
     "huggingface": hf_key,
 }
 
+if st.session_state.index_ready:
+    indexed_files_text = ", ".join(st.session_state.indexed_docs) if st.session_state.indexed_docs else "nao informado"
+    st.info(
+        "Indice ativo na sessao. "
+        f"Provedor: {st.session_state.indexed_provider}. "
+        f"Arquivos: {indexed_files_text}"
+    )
+
 if st.button("Processar documentos", type="primary"):
     if not uploaded_files:
         st.error("Envie pelo menos um arquivo antes de processar.")
-    elif not postgres_dsn:
-        st.error("Informe o PostgreSQL DSN para armazenar embeddings.")
-    elif not api_keys.get(provider):
-        st.error(f"Informe a chave do provedor selecionado: {provider}.")
+    elif not _validate_runtime(provider=provider, api_keys=api_keys, postgres_dsn=postgres_dsn):
+        st.stop()
     else:
         try:
             all_chunks: List[dict] = []
+            indexed_files: List[str] = []
             for uploaded_file in uploaded_files:
                 text = extract_text_from_uploaded_file(uploaded_file)
                 chunks = chunk_text(
@@ -71,6 +121,7 @@ if st.button("Processar documentos", type="primary"):
                     metadata={"source": uploaded_file.name},
                 )
                 all_chunks.extend(chunks)
+                indexed_files.append(uploaded_file.name)
 
             if not all_chunks:
                 st.error("Nao foi possivel extrair conteudo util dos arquivos enviados.")
@@ -83,6 +134,8 @@ if st.button("Processar documentos", type="primary"):
                 store.upsert_chunks(chunks=all_chunks, embeddings=embeddings)
 
                 st.session_state.index_ready = True
+                st.session_state.indexed_docs = indexed_files
+                st.session_state.indexed_provider = provider
                 st.success(f"Indexacao concluida com {len(all_chunks)} chunks.")
         except Exception as exc:
             st.session_state.index_ready = False
@@ -95,10 +148,13 @@ if st.button("Perguntar"):
         st.error("Processe os documentos antes de perguntar.")
     elif not question.strip():
         st.error("Digite uma pergunta valida.")
-    elif not postgres_dsn:
-        st.error("Informe o PostgreSQL DSN.")
-    elif not api_keys.get(provider):
-        st.error(f"Informe a chave do provedor selecionado: {provider}.")
+    elif st.session_state.indexed_provider and provider != st.session_state.indexed_provider:
+        st.error(
+            "O provedor atual difere do provedor usado na indexacao. "
+            "Reprocesse os documentos com o mesmo provedor selecionado para garantir consistencia."
+        )
+    elif not _validate_runtime(provider=provider, api_keys=api_keys, postgres_dsn=postgres_dsn):
+        st.stop()
     else:
         try:
             query_embedding = embed_query(

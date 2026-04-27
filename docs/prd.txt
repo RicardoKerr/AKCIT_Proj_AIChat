@@ -1,0 +1,171 @@
+# 📌 PRD — Chatbot de Perguntas e Respostas (RAG)
+
+---
+
+## 1. 🎯 Visão do Produto
+
+Desenvolver um chatbot capaz de responder perguntas com base em documentos específicos (ex: PDF), utilizando a abordagem RAG (Retrieval Augmented Generation), garantindo respostas contextualizadas, precisas e rastreáveis.
+
+---
+
+## 2. 🎯 Objetivo
+
+Permitir que usuários consultem documentos de forma conversacional, reduzindo o tempo de busca e aumentando a precisão das respostas com base em conteúdo real.
+
+---
+
+## 3. 👤 Público-Alvo
+
+- Profissionais de negócios  
+- Equipes de suporte  
+- Analistas e desenvolvedores  
+- Usuários que lidam com documentação extensa  
+
+---
+
+## 4. 💥 Problema
+
+- Documentos longos são difíceis de navegar  
+- Busca manual é lenta e pouco eficiente  
+- Chatbots tradicionais geram respostas sem base confiável  
+
+---
+
+## 5. ✅ Proposta de Valor
+
+- Respostas baseadas em conteúdo real (grounded)  
+- Redução de alucinações da IA  
+- Experiência simples e conversacional  
+- Acesso rápido à informação relevante  
+
+---
+
+## 6. 🚀 Escopo do MVP
+
+### Funcionalidades principais
+
+- Upload de documento PDF  
+- Processamento e divisão do conteúdo  
+- Geração de embeddings  
+- Armazenamento dos dados no PostgreSQL  
+- Interface de chat para perguntas  
+- Recuperação de contexto relevante  
+- Geração de respostas baseadas no documento  
+- Exibição do trecho fonte utilizado  
+
+---
+
+## 7. ❌ Fora do Escopo (MVP)
+
+- Multi-documentos avançado  
+- Sistema de autenticação  
+- Histórico persistente de conversas  
+- Treinamento de modelo próprio  
+- Interface complexa  
+
+---
+
+## 8. 📏 Critérios de Sucesso
+
+- Respostas coerentes com o conteúdo do documento  
+- Respostas com referência ao trecho fonte  
+- Tempo de resposta inferior a 3 segundos  
+- Baixa incidência de respostas fora de contexto  
+- Testes automatizados passando  
+
+---
+
+## 9. 🤖 Uso de IA
+
+A IA será utilizada para:
+
+- Geração de embeddings  
+- Geração de respostas (LLM)  
+- Apoio na criação de código  
+- Geração de testes automatizados  
+- Documentação (README e comentários)  
+
+---
+
+## 10. ⚠️ Riscos
+
+- Alucinação do modelo  
+- Recuperação de contexto irrelevante  
+- Chunking mal definido  
+- Latência elevada  
+- Dependência de APIs externas  
+
+---
+
+## 11. 🔐 Requisitos Funcionais
+
+| ID | Requisito |
+|----|----------|
+| RF01 | Permitir upload de PDF |
+| RF02 | Extrair texto do documento |
+| RF03 | Dividir o conteúdo em chunks |
+| RF04 | Gerar embeddings dos chunks |
+| RF05 | Armazenar dados no PostgreSQL |
+| RF06 | Receber perguntas do usuário |
+| RF07 | Recuperar conteúdo relevante |
+| RF08 | Gerar resposta baseada no contexto |
+| RF09 | Exibir trecho fonte da resposta |
+
+---
+
+## 12. ⚙️ Requisitos Não Funcionais
+
+| ID | Requisito |
+|----|----------|
+| RNF01 | Tempo de resposta < 3 segundos |
+| RNF02 | Sistema modular e escalável |
+| RNF03 | Código testável |
+| RNF04 | Uso seguro de API keys |
+| RNF05 | Baixo acoplamento entre componentes |
+
+---
+
+## 13. 🚫 Controle de Qualidade (Anti-Alucinação)
+
+- Respostas devem ser baseadas exclusivamente no contexto recuperado  
+- O sistema deve informar quando não houver resposta no documento  
+- O sistema deve exibir o trecho fonte utilizado  
+- Evitar respostas especulativas  
+
+---
+
+## 14. 🧪 Testabilidade
+
+- Testar ingestão de documentos  
+- Testar qualidade da recuperação de contexto  
+- Testar coerência das respostas  
+- Validar perguntas com respostas conhecidas  
+
+---
+
+## 15. 📦 Entregáveis
+
+- Código-fonte em repositório GitHub  
+- README completo e documentado  
+- Testes automatizados  
+- Interface funcional (Streamlit/Gradio)  
+- Arquivo de dependências  
+- Tag de versão (v1.0.0)  
+
+---
+
+## 16. 🔄 Roadmap Futuro
+
+- Suporte a múltiplos documentos  
+- Memória de conversação  
+- API REST  
+- Interface mais robusta  
+- Ranking avançado (RAG híbrido)  
+
+---
+
+## 17. 📌 Considerações Finais
+
+O foco do MVP é validar a capacidade de construir um sistema RAG funcional, confiável e testável, priorizando qualidade de resposta e controle de comportamento da IA, em vez de complexidade técnica desnecessária.
+
+---

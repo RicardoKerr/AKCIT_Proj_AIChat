@@ -1,4 +1,6 @@
 import os
+import re
+from collections import Counter
 from typing import Dict, List
 
 import streamlit as st
@@ -18,6 +20,7 @@ def _ensure_session_defaults() -> None:
         "indexed_docs": [],
         "indexed_provider": "",
         "indexed_collection": "rag_chunks",
+        "suggested_questions": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -31,6 +34,52 @@ def _validate_runtime(provider: str, api_keys: Dict[str, str]) -> bool:
         return False
 
     return True
+
+
+def _normalize_token(token: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9à-úÀ-Ú_-]", "", token.lower()).strip("_")
+    return cleaned
+
+
+def _suggest_questions_from_chunks(chunks: List[dict], limit: int = 3) -> List[str]:
+    stopwords = {
+        "a", "o", "os", "as", "de", "da", "do", "das", "dos", "e", "em", "para", "por",
+        "que", "com", "na", "no", "nas", "nos", "um", "uma", "uns", "umas", "se", "ou",
+        "ao", "aos", "sua", "seu", "suas", "seus", "como", "ser", "sao", "são", "mais", "menos",
+        "sobre", "pelo", "pela", "pelos", "pelas", "isso", "essa", "esse", "este", "esta", "estes",
+        "estas", "tambem", "também", "entre", "quando", "onde", "qual", "quais", "porque", "pois",
+    }
+
+    token_counter: Counter = Counter()
+    for chunk in chunks[:6]:
+        for raw in chunk.get("content", "").split():
+            token = _normalize_token(raw)
+            if len(token) < 4 or token.isdigit() or token in stopwords:
+                continue
+            token_counter[token] += 1
+
+    keywords = [token for token, _ in token_counter.most_common(8)]
+    questions: List[str] = []
+
+    for keyword in keywords:
+        candidate = f"O que o documento diz sobre {keyword}?"
+        if candidate not in questions:
+            questions.append(candidate)
+        if len(questions) >= limit:
+            return questions
+
+    fallback_questions = [
+        "Qual e o objetivo principal deste documento?",
+        "Quais pontos mais importantes o documento apresenta?",
+        "Quais recomendacoes praticas o documento sugere?",
+    ]
+    for fallback in fallback_questions:
+        if fallback not in questions:
+            questions.append(fallback)
+        if len(questions) >= limit:
+            break
+
+    return questions[:limit]
 
 
 st.set_page_config(page_title="Chatbot RAG", page_icon="RAG", layout="wide")
@@ -66,11 +115,17 @@ with st.sidebar:
 
     top_k = st.slider("Top-K", min_value=3, max_value=5, value=4)
     similarity_threshold = st.slider("Threshold de similaridade", 0.0, 1.0, 0.6, 0.05)
+    diagnostic_mode = st.checkbox(
+        "Modo diagnostico",
+        value=False,
+        help="Mostra scores de similaridade e chunks retornados, incluindo os descartados pelo threshold.",
+    )
 
     if st.button("Limpar indice atual"):
         st.session_state.index_ready = False
         st.session_state.indexed_docs = []
         st.session_state.indexed_provider = ""
+        st.session_state.suggested_questions = []
         st.success("Indice removido da sessao. Processe os documentos novamente.")
 
 st.divider()
@@ -95,6 +150,10 @@ if st.session_state.index_ready:
         f"Colecao: {st.session_state.indexed_collection}. "
         f"Arquivos: {indexed_files_text}"
     )
+    if st.session_state.suggested_questions:
+        st.markdown("**Perguntas sugeridas para comecar**")
+        for idx, suggested in enumerate(st.session_state.suggested_questions, start=1):
+            st.write(f"{idx}. {suggested}")
 
 if st.button("Processar documentos", type="primary"):
     if not uploaded_files:
@@ -130,7 +189,11 @@ if st.button("Processar documentos", type="primary"):
                 st.session_state.indexed_docs = indexed_files
                 st.session_state.indexed_provider = provider
                 st.session_state.indexed_collection = collection_name
+                st.session_state.suggested_questions = _suggest_questions_from_chunks(all_chunks, limit=3)
                 st.success(f"Indexacao concluida com {len(all_chunks)} chunks.")
+                st.markdown("**Sugestoes de perguntas com base no documento**")
+                for idx, suggested in enumerate(st.session_state.suggested_questions, start=1):
+                    st.write(f"{idx}. {suggested}")
         except Exception as exc:
             st.session_state.index_ready = False
             st.error(f"Falha ao processar documentos: {exc}")
@@ -161,11 +224,12 @@ if st.button("Perguntar"):
                 collection_name=st.session_state.indexed_collection,
                 persist_dir=".chroma",
             )
-            results = store.search_similar(
+            diagnostic_results = store.search_similar(
                 query_embedding=query_embedding,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
+                top_k=max(top_k, 8),
+                similarity_threshold=0.0,
             )
+            results = [row for row in diagnostic_results if float(row.get("similarity", 0.0)) >= similarity_threshold][:top_k]
 
             if not results:
                 st.warning("Nao encontrei essa informacao no documento.")
@@ -187,5 +251,22 @@ if st.button("Perguntar"):
                     similarity = round(float(row.get("similarity", 0.0)), 4)
                     st.markdown(f"{idx}. Fonte: {source} | Similaridade: {similarity}")
                     st.code(row["content"][:1000])
+
+            if diagnostic_mode:
+                st.subheader("Diagnostico de recuperacao")
+                if not diagnostic_results:
+                    st.info("Nenhum chunk retornado pelo retriever.")
+                else:
+                    st.caption(
+                        "A tabela abaixo mostra os chunks retornados pelo retriever e quais foram descartados pelo threshold atual."
+                    )
+                    for idx, row in enumerate(diagnostic_results, start=1):
+                        similarity = float(row.get("similarity", 0.0))
+                        source = row.get("metadata", {}).get("source", "desconhecido")
+                        status = "APROVADO" if similarity >= similarity_threshold else "DESCARTADO"
+                        st.markdown(
+                            f"{idx}. [{status}] Fonte: {source} | Similaridade: {round(similarity, 4)}"
+                        )
+                        st.code(row.get("content", "")[:500])
         except Exception as exc:
             st.error(f"Falha ao gerar resposta: {exc}")
